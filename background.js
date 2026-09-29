@@ -1465,9 +1465,9 @@ async function syncNoteToKnowledgeBase(note) {
   }
 }
 
-async function companionPost(path, body) {
+async function companionPost(path, body, timeoutMs = 10_000) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${COMPANION_URL}${path}`, {
       method: "POST",
@@ -1493,7 +1493,7 @@ async function handleTranslateArticle(payload) {
   if (!Array.isArray(payload?.paragraphs) || !payload.paragraphs.length) {
     return { success: false, error: "No article paragraphs supplied." };
   }
-  return companionPost("/translate", payload);
+  return companionPost("/translate", payload, 120_000);
 }
 
 async function replaceStoredNote(note) {
@@ -2254,6 +2254,7 @@ globalThis.__YTD_TRANSLATION_TESTING__ = {
   validateTranscriptBatchRequest,
   normalizeTranslatedSegmentBatch,
   handleTranslateLiveSubtitle,
+  handleTranslateArticle,
   mergeOverlayTranslationsIntoCache,
   ensureOverviewForVideo,
   handleSaveNote,

@@ -5,7 +5,7 @@ const DEFAULT_MODEL = "gpt-5.4-nano";
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
 const DEFAULT_MINIMAX_MODEL = "MiniMax-M3";
 const TRANSLATION_INSTRUCTIONS =
-  "Translate English reading paragraphs into concise Chinese reading aids. Preserve important English terms in parentheses when useful. Return strict JSON only: {\"translations\":[...]}.";
+  "Translate every supplied reading paragraph completely into Chinese. Do not summarize or omit sentences, list items, or repeated text. Return exactly one translation per input paragraph in the same order. Preserve important English terms in parentheses when useful. Return strict JSON only: {\"translations\":[...]}.";
 const proxyAgents = new Map();
 
 const providerConfigs = {
@@ -158,13 +158,14 @@ function translationValue(value) {
 
 function parseTranslations(text, paragraphCount) {
   const parsed = JSON.parse(cleanJsonText(text));
-  const translations = Array.isArray(parsed.translations) ? parsed.translations.map(translationValue) : [];
+  const translations = Array.isArray(parsed.translations) ? parsed.translations.map((value) => {
+    const text = translationValue(value).trim();
+    return text === "[object Object]" ? "" : text;
+  }) : [];
   if (translations.length !== paragraphCount) {
     throw new Error("translation_count_mismatch");
   }
-  if (translations.some((translation) => !translation.trim())) {
-    throw new Error("translation_value_invalid");
-  }
+  // Preserve valid positions so the reader can retry only missing entries.
   return translations;
 }
 
@@ -238,6 +239,7 @@ export async function translateParagraphs(input, options = {}) {
   const url = provider.kind === "chat" ? `${provider.baseUrl}/chat/completions` : provider.url;
   const init = {
     method: "POST",
+    signal: AbortSignal.timeout(110_000),
     headers: {
       authorization: `Bearer ${provider.apiKey}`,
       "content-type": "application/json"

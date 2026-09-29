@@ -266,6 +266,7 @@
 		};
 	}
 	function isUsableTranslationText(value) {
+		if (typeof value !== "string") return false;
 		const text = value.trim();
 		return Boolean(text) && text !== "[object Object]";
 	}
@@ -281,6 +282,101 @@
 		batches.push(pending.slice(0, firstBatchSize));
 		for (let index = firstBatchSize; index < pending.length; index += batchSize) batches.push(pending.slice(index, index + batchSize));
 		return batches;
+	}
+	//#endregion
+	//#region src/article-reader/translation-dom.ts
+	var excluded = [
+		".rk-toolbar",
+		".rk-note-editor",
+		".rk-note-panel",
+		".rk-note-bubble",
+		".rk-toast",
+		".rk-translation",
+		".rk-page-actions",
+		"nav",
+		"footer",
+		"script",
+		"style",
+		"noscript",
+		"template",
+		"pre",
+		"code",
+		"button",
+		"input",
+		"textarea",
+		"select",
+		"svg",
+		"canvas",
+		"iframe",
+		"[hidden]",
+		"[inert]",
+		"[aria-hidden=\"true\"]",
+		"[contenteditable]:not([contenteditable=\"false\"])",
+		"[role=\"navigation\"]",
+		"[role=\"menu\"]",
+		"[role=\"dialog\"]"
+	].join(", ");
+	var blockTags = "h1,h2,h3,h4,h5,h6,p,li,blockquote,figcaption,dt,dd,td,th,caption,div,section,article,main,header,aside,[role=\"heading\"],[role=\"paragraph\"],[role=\"listitem\"]";
+	/** Assign each visible text node to one block, rather than guessing from text length. */
+	function collectPageTranslationBlocks(sourceId) {
+		if (!document.body) return [];
+		const parts = /* @__PURE__ */ new Map();
+		const view = document.defaultView;
+		function visit(element, owner) {
+			if (element.matches(excluded)) return;
+			if (element.matches("header, aside") && !element.closest("article, main, [role=\"main\"]")) return;
+			const style = view?.getComputedStyle(element);
+			if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse") return;
+			if (element.matches(blockTags) && !(element.matches("p") && owner.matches("li, [role=\"listitem\"]"))) owner = element;
+			for (const node of Array.from(element.childNodes)) if (node.nodeType === Node.TEXT_NODE) {
+				const value = node.textContent ?? "";
+				if (!parts.has(owner) && value.trim()) parts.set(owner, []);
+				parts.get(owner)?.push(value);
+			} else if (node instanceof HTMLElement) {
+				if (node.matches("br")) parts.get(owner)?.push("\n");
+				else {
+					const separates = node.matches(blockTags + ",ul,ol,dl,table,tr");
+					if (separates) parts.get(owner)?.push("\n");
+					visit(node, owner);
+					if (separates) parts.get(owner)?.push("\n");
+				}
+			}
+		}
+		visit(document.body, document.body);
+		return Array.from(parts, ([element, chunks]) => {
+			const text = chunks.join("").replace(/\s+/g, " ").trim();
+			return {
+				element,
+				text,
+				key: translationBlockKey(sourceId, text)
+			};
+		}).filter(({ text }) => /\p{L}/u.test(text));
+	}
+	var translationOwners = /* @__PURE__ */ new WeakMap();
+	var translationNodes = /* @__PURE__ */ new WeakMap();
+	var containedTranslation = "li,td,th,dt,dd,caption,div,section,article,main,body,header,aside,blockquote,[role=\"listitem\"]";
+	function translationElement(element) {
+		const known = translationNodes.get(element);
+		if (known?.isConnected) return known;
+		const candidate = element.matches(containedTranslation) ? element.querySelector(":scope > .rk-translation") : element.nextElementSibling;
+		if (!(candidate instanceof HTMLElement) || !candidate.classList.contains("rk-translation")) return null;
+		const owner = translationOwners.get(candidate);
+		if (owner && owner !== element) return null;
+		translationOwners.set(candidate, element);
+		translationNodes.set(element, candidate);
+		return candidate;
+	}
+	function ensureTranslationElement(element) {
+		const existing = translationElement(element);
+		if (existing) return existing;
+		const translation = document.createElement("span");
+		translation.className = "rk-translation";
+		translation.lang = "zh-CN";
+		translationOwners.set(translation, element);
+		translationNodes.set(element, translation);
+		if (element.matches(containedTranslation)) element.insertBefore(translation, element.querySelector(":scope > ul, :scope > ol"));
+		else element.after(translation);
+		return translation;
 	}
 	//#endregion
 	//#region src/article-reader/index.ts
@@ -768,19 +864,6 @@
 		showToast(syncStatus === "synced" ? "Synced" : syncStatus === "obsidian_only" ? "Obsidian synced" : "Saved");
 		resetPendingSelection();
 	}
-	function translationElement(element) {
-		const candidate = element.matches("li") ? element.querySelector(":scope > .rk-translation") : element.nextElementSibling;
-		return candidate?.classList.contains("rk-translation") ? candidate : null;
-	}
-	function ensureTranslationElement(element) {
-		const existing = translationElement(element);
-		if (existing) return existing;
-		const translation = document.createElement("span");
-		translation.className = "rk-translation";
-		if (element.matches("li")) element.insertBefore(translation, element.querySelector(":scope > ul, :scope > ol"));
-		else element.after(translation);
-		return translation;
-	}
 	function insertTranslationAfter(element, text) {
 		const translation = ensureTranslationElement(element);
 		translation.textContent = text;
@@ -799,44 +882,16 @@
 		translation.classList.add("rk-translation-error");
 		translation.textContent = "Translation paused. Tap Translate to retry.";
 	}
-	function translationSourceText(element) {
-		if (!element.matches("li")) return element.innerText.trim();
-		const clone = element.cloneNode(true);
-		clone.querySelectorAll("ul, ol, .rk-translation").forEach((child) => child.remove());
-		return (clone.textContent ?? "").trim();
-	}
-	function isReadableBlock(element) {
-		if (element.closest([
-			".rk-toolbar",
-			".rk-note-editor",
-			".rk-note-panel",
-			".rk-toast",
-			".rk-translation",
-			".rk-page-actions",
-			"nav",
-			"footer",
-			"header",
-			"aside",
-			"script",
-			"style"
-		].join(", "))) return false;
-		const text = translationSourceText(element);
-		if (element.matches("h1, h2")) return text.length >= 8;
-		return text.length >= 50;
-	}
 	function collectTranslationBlocks(sourceId) {
-		return uniqueTranslationBlocks(Array.from(document.querySelectorAll("h1, h2, p, li")).filter((element) => element.matches("li") || !element.closest("li")).filter(isReadableBlock).map((element) => {
-			const text = translationSourceText(element);
-			return {
-				element,
-				key: translationBlockKey(sourceId, text),
-				text
-			};
-		}));
+		return collectPageTranslationBlocks(sourceId);
 	}
 	async function requestTranslations(paragraphs) {
+		let timeoutId;
 		try {
-			const data = await chrome.runtime.sendMessage({
+			const timeout = new Promise((_resolve, reject) => {
+				timeoutId = window.setTimeout(() => reject(/* @__PURE__ */ new Error("Translation timed out")), 13e4);
+			});
+			const data = await Promise.race([timeout, chrome.runtime.sendMessage({
 				action: "translateArticle",
 				payload: {
 					source: {
@@ -845,25 +900,33 @@
 					},
 					paragraphs
 				}
-			});
+			})]);
 			if (!data.success) return null;
-			return data.translations?.length === paragraphs.length ? data.translations : null;
+			if (!Array.isArray(data.translations) || data.translations.length !== paragraphs.length) return null;
+			return data.translations.map((value) => isUsableTranslationText(value) ? value.trim() : "");
 		} catch {
 			return null;
+		} finally {
+			window.clearTimeout(timeoutId);
 		}
 	}
 	async function translateBatchWithFallback(batch) {
-		const batchTranslations = await requestTranslations(batch.map((item) => item.text));
-		if (batchTranslations) return batchTranslations;
-		if (batch.length === 1) return [];
-		const translations = [];
-		for (const item of batch) {
-			const [translation] = await requestTranslations([item.text]) ?? [];
-			translations.push(translation ?? "");
+		const translations = await requestTranslations(batch.map((item) => item.text)) ?? batch.map(() => "");
+		if (batch.length === 1) return translations;
+		for (let index = 0; index < batch.length; index += 1) if (!isUsableTranslationText(translations[index])) {
+			const [translation] = await requestTranslations([batch[index].text]) ?? [];
+			translations[index] = translation ?? "";
 		}
 		return translations;
 	}
-	async function translatePage() {
+	var activeTranslation = null;
+	function translatePage() {
+		if (!activeTranslation) activeTranslation = translatePageOnce().finally(() => {
+			activeTranslation = null;
+		});
+		return activeTranslation;
+	}
+	async function translatePageOnce() {
 		if (!currentSource) currentSource = await captureSource();
 		const source = currentSource;
 		const blocks = collectTranslationBlocks(source.id);
@@ -879,7 +942,7 @@
 			const translation = cachedByKey.get(block.key)?.translation;
 			if (translation) insertTranslationAfter(block.element, translation);
 		}
-		const batches = createTranslationBatches(blocks, cachedKeys, {
+		const batches = createTranslationBatches(uniqueTranslationBlocks(blocks), cachedKeys, {
 			firstBatchSize: 1,
 			batchSize: 3
 		});
@@ -890,13 +953,17 @@
 		showToast(cachedBlockCount > 0 ? "Continuing translation" : "Translating");
 		let translatedCount = cachedBlockCount;
 		for (const batch of batches) {
-			batch.forEach((item) => markTranslationPending(item.element));
+			const batchKeys = new Set(batch.map((item) => item.key));
+			const occurrences = blocks.filter((item) => batchKeys.has(item.key) && item.element.isConnected);
+			occurrences.forEach((item) => markTranslationPending(item.element));
 			const translations = await translateBatchWithFallback(batch);
 			const records = [];
 			translations.forEach((translation, index) => {
 				const block = batch[index];
 				if (!block || !isUsableTranslationText(translation)) return;
-				insertTranslationAfter(block.element, translation);
+				occurrences.filter((item) => item.key === block.key).forEach((item) => {
+					insertTranslationAfter(item.element, translation);
+				});
 				records.push(createTranslationRecord({
 					sourceId: source.id,
 					text: block.text,
@@ -905,10 +972,11 @@
 			});
 			if (records.length > 0) {
 				await saveTranslations(source.id, records);
-				translatedCount += records.length;
+				const savedKeys = new Set(records.map((record) => record.textHash));
+				translatedCount += occurrences.filter((item) => savedKeys.has(item.key)).length;
 			}
 			batch.forEach((item, index) => {
-				if (!translations[index]) markTranslationError(item.element);
+				if (!isUsableTranslationText(translations[index])) occurrences.filter((block) => block.key === item.key).forEach((block) => markTranslationError(block.element));
 			});
 		}
 		if (translatedCount > 0) showToast(`Translated ${Math.min(translatedCount, blocks.length)}/${blocks.length}`);
