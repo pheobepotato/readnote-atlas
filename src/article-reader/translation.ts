@@ -38,7 +38,8 @@ export function createTranslationRecord(input: {
   };
 }
 
-export function isUsableTranslationText(value: string): boolean {
+export function isUsableTranslationText(value: unknown): value is string {
+  if (typeof value !== "string") return false;
   const text = value.trim();
   return Boolean(text) && text !== "[object Object]";
 }

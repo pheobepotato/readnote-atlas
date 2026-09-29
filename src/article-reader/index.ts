@@ -25,10 +25,11 @@ import {
   createTranslationBatches,
   createTranslationRecord,
   isUsableTranslationText,
-  translationBlockKey,
   uniqueTranslationBlocks,
   type TranslationBlock
 } from "./translation";
+
+import { collectPageTranslationBlocks, ensureTranslationElement, translationElement } from "./translation-dom";
 
 const TOOLBAR_WIDTH = 312;
 const TOOLBAR_HEIGHT = 34;
@@ -662,91 +663,40 @@ async function saveExcerptFromSelection(): Promise<void> {
   resetPendingSelection();
 }
 
-function insertTranslationAfter(paragraph: HTMLElement, text: string): void {
-  if (paragraph.nextElementSibling?.classList.contains("rk-translation")) {
-    paragraph.nextElementSibling.textContent = text;
-    paragraph.nextElementSibling.classList.remove("rk-translation-pending", "rk-translation-error");
-    return;
-  }
-
-  const translation = document.createElement("span");
-  translation.className = "rk-translation";
+function insertTranslationAfter(element: HTMLElement, text: string): void {
+  const translation = ensureTranslationElement(element);
   translation.textContent = text;
-  paragraph.after(translation);
+  translation.classList.remove("rk-translation-pending", "rk-translation-error");
 }
 
 function markTranslationPending(element: HTMLElement): void {
-  if (element.nextElementSibling?.classList.contains("rk-translation")) {
-    element.nextElementSibling.classList.remove("rk-translation-error");
-    element.nextElementSibling.classList.add("rk-translation-pending");
-    element.nextElementSibling.textContent = "Translating...";
-    return;
-  }
-
-  const translation = document.createElement("span");
-  translation.className = "rk-translation rk-translation-pending";
+  const translation = ensureTranslationElement(element);
+  translation.classList.remove("rk-translation-error");
+  translation.classList.add("rk-translation-pending");
   translation.textContent = "Translating...";
-  element.after(translation);
 }
 
 function markTranslationError(element: HTMLElement): void {
-  if (!element.nextElementSibling?.classList.contains("rk-translation")) {
+  const translation = translationElement(element);
+  if (!translation) {
     return;
   }
-
-  element.nextElementSibling.classList.remove("rk-translation-pending");
-  element.nextElementSibling.classList.add("rk-translation-error");
-  element.nextElementSibling.textContent = "Translation paused. Tap Translate to retry.";
-}
-
-function isReadableBlock(element: HTMLElement): boolean {
-  if (
-    element.closest(
-      [
-        ".rk-toolbar",
-        ".rk-note-editor",
-        ".rk-note-panel",
-        ".rk-toast",
-        ".rk-translation",
-        ".rk-page-actions",
-        "nav",
-        "footer",
-        "header",
-        "aside",
-        "script",
-        "style"
-      ].join(", ")
-    )
-  ) {
-    return false;
-  }
-
-  const text = element.innerText.trim();
-  if (element.matches("h1, h2")) {
-    return text.length >= 8;
-  }
-
-  return text.length >= 50;
+  translation.classList.remove("rk-translation-pending");
+  translation.classList.add("rk-translation-error");
+  translation.textContent = "Translation paused. Tap Translate to retry.";
 }
 
 function collectTranslationBlocks(sourceId: string): Array<TranslationBlock & { element: HTMLElement }> {
-  return uniqueTranslationBlocks(
-    Array.from(document.querySelectorAll<HTMLElement>("h1, h2, p"))
-      .filter(isReadableBlock)
-      .map((element) => {
-      const text = element.innerText.trim();
-      return {
-        element,
-        key: translationBlockKey(sourceId, text),
-        text
-      };
-      })
-  );
+  return collectPageTranslationBlocks(sourceId);
 }
 
 async function requestTranslations(paragraphs: string[]): Promise<string[] | null> {
+  let timeoutId: number | undefined;
   try {
-    const data = (await chrome.runtime.sendMessage({
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutId = window.setTimeout(() => reject(new Error("Translation timed out")), 130_000);
+    });
+    const data = (await Promise.race([timeout, chrome.runtime.sendMessage({
       action: "translateArticle",
       payload: {
         source: {
@@ -755,35 +705,44 @@ async function requestTranslations(paragraphs: string[]): Promise<string[] | nul
         },
         paragraphs
       }
-    })) as { success?: boolean; translations?: string[] };
+    })])) as { success?: boolean; translations?: string[] };
     if (!data.success) {
       return null;
     }
-    return data.translations?.length === paragraphs.length ? data.translations : null;
+    if (!Array.isArray(data.translations) || data.translations.length !== paragraphs.length) {
+      return null;
+    }
+    return data.translations.map((value) => isUsableTranslationText(value) ? value.trim() : "");
   } catch {
     return null;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 
 async function translateBatchWithFallback(batch: Array<TranslationBlock & { element: HTMLElement }>): Promise<string[]> {
   const batchTranslations = await requestTranslations(batch.map((item) => item.text));
-  if (batchTranslations) {
-    return batchTranslations;
-  }
-
-  if (batch.length === 1) {
-    return [];
-  }
-
-  const translations: string[] = [];
-  for (const item of batch) {
-    const [translation] = (await requestTranslations([item.text])) ?? [];
-    translations.push(translation ?? "");
+  const translations = batchTranslations ?? batch.map(() => "");
+  if (batch.length === 1) return translations;
+  for (let index = 0; index < batch.length; index += 1) {
+    if (!isUsableTranslationText(translations[index])) {
+      const [translation] = (await requestTranslations([batch[index].text])) ?? [];
+      translations[index] = translation ?? "";
+    }
   }
   return translations;
 }
 
-async function translatePage(): Promise<void> {
+let activeTranslation: Promise<void> | null = null;
+
+function translatePage(): Promise<void> {
+  if (!activeTranslation) {
+    activeTranslation = translatePageOnce().finally(() => { activeTranslation = null; });
+  }
+  return activeTranslation;
+}
+
+async function translatePageOnce(): Promise<void> {
   if (!currentSource) {
     currentSource = await captureSource();
   }
@@ -812,7 +771,7 @@ async function translatePage(): Promise<void> {
     }
   }
 
-  const batches = createTranslationBatches(blocks, cachedKeys, { firstBatchSize: 1, batchSize: 3 });
+  const batches = createTranslationBatches(uniqueTranslationBlocks(blocks), cachedKeys, { firstBatchSize: 1, batchSize: 3 });
   if (batches.length === 0) {
     showToast("Translated");
     return;
@@ -821,7 +780,9 @@ async function translatePage(): Promise<void> {
   showToast(cachedBlockCount > 0 ? "Continuing translation" : "Translating");
   let translatedCount = cachedBlockCount;
   for (const batch of batches) {
-    batch.forEach((item) => markTranslationPending(item.element));
+    const batchKeys = new Set(batch.map((item) => item.key));
+    const occurrences = blocks.filter((item) => batchKeys.has(item.key) && item.element.isConnected);
+    occurrences.forEach((item) => markTranslationPending(item.element));
     const translations = await translateBatchWithFallback(batch);
     const records: TranslationRecord[] = [];
 
@@ -831,7 +792,9 @@ async function translatePage(): Promise<void> {
         return;
       }
 
-      insertTranslationAfter(block.element, translation);
+      occurrences.filter((item) => item.key === block.key).forEach((item) => {
+        insertTranslationAfter(item.element, translation);
+      });
       records.push(
         createTranslationRecord({
           sourceId: source.id,
@@ -843,12 +806,13 @@ async function translatePage(): Promise<void> {
 
     if (records.length > 0) {
       await saveTranslations(source.id, records);
-      translatedCount += records.length;
+      const savedKeys = new Set(records.map((record) => record.textHash));
+      translatedCount += occurrences.filter((item) => savedKeys.has(item.key)).length;
     }
 
     batch.forEach((item, index) => {
-      if (!translations[index]) {
-        markTranslationError(item.element);
+      if (!isUsableTranslationText(translations[index])) {
+        occurrences.filter((block) => block.key === item.key).forEach((block) => markTranslationError(block.element));
       }
     });
   }

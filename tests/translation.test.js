@@ -938,3 +938,17 @@ test("Chinese prompt preserves natural bilingual-learning style rules", () => {
   assert.match(prompt, /spaces between Chinese and adjacent English words or digits/);
   assert.match(prompt, /source-language `text`/);
 });
+
+test('article translation allows provider latency beyond the generic companion timeout', async () => {
+  const timers = [];
+  const cleared = [];
+  const helpers = loadBackgroundHelpers({
+    setTimeoutImpl(callback, delay) { timers.push({ callback, delay }); return timers.length; },
+    clearTimeoutImpl(id) { cleared.push(id); },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ translations: ['中文'] }) })
+  });
+  const result = await helpers.handleTranslateArticle({ paragraphs: ['A paragraph.'] });
+  assert.equal(result.success, true);
+  assert.equal(timers.at(-1).delay, 120_000);
+  assert.ok(cleared.includes(timers.length));
+});

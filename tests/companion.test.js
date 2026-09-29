@@ -45,3 +45,23 @@ test("companion defaults to the same DeepSeek provider as video features", async
   assert.equal(status.provider, "deepseek");
   assert.equal(status.model, "deepseek-v4-flash");
 });
+
+test('article provider preserves valid partial results and positions for targeted retries', async () => {
+  const { translateParagraphs } = await import('../scripts/companion/companion-openai.mjs');
+  const result = await translateParagraphs({ paragraphs: ['First.', 'Second.', 'Third.'] }, {
+    provider: 'deepseek', apiKey: 'test-key',
+    fetchImpl: async (_url, init) => {
+      assert.ok(init.signal instanceof AbortSignal);
+      return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({translations: ['第一。', ' ', {text: '第三。'}]}) } }] }) };
+    }
+  });
+  assert.deepEqual(result, ['第一。', '', '第三。']);
+});
+
+test('article provider rejects count mismatch instead of attaching translations to wrong blocks', async () => {
+  const { translateParagraphs } = await import('../scripts/companion/companion-openai.mjs');
+  await assert.rejects(translateParagraphs({ paragraphs: ['First.', 'Second.'] }, {
+    provider: 'deepseek', apiKey: 'test-key',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: {content: '{"translations":["第一。"]}'} }] }) })
+  }), /translation_count_mismatch/);
+});
