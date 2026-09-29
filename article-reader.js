@@ -768,34 +768,42 @@
 		showToast(syncStatus === "synced" ? "Synced" : syncStatus === "obsidian_only" ? "Obsidian synced" : "Saved");
 		resetPendingSelection();
 	}
-	function insertTranslationAfter(paragraph, text) {
-		if (paragraph.nextElementSibling?.classList.contains("rk-translation")) {
-			paragraph.nextElementSibling.textContent = text;
-			paragraph.nextElementSibling.classList.remove("rk-translation-pending", "rk-translation-error");
-			return;
-		}
+	function translationElement(element) {
+		const candidate = element.matches("li") ? element.querySelector(":scope > .rk-translation") : element.nextElementSibling;
+		return candidate?.classList.contains("rk-translation") ? candidate : null;
+	}
+	function ensureTranslationElement(element) {
+		const existing = translationElement(element);
+		if (existing) return existing;
 		const translation = document.createElement("span");
 		translation.className = "rk-translation";
+		if (element.matches("li")) element.insertBefore(translation, element.querySelector(":scope > ul, :scope > ol"));
+		else element.after(translation);
+		return translation;
+	}
+	function insertTranslationAfter(element, text) {
+		const translation = ensureTranslationElement(element);
 		translation.textContent = text;
-		paragraph.after(translation);
+		translation.classList.remove("rk-translation-pending", "rk-translation-error");
 	}
 	function markTranslationPending(element) {
-		if (element.nextElementSibling?.classList.contains("rk-translation")) {
-			element.nextElementSibling.classList.remove("rk-translation-error");
-			element.nextElementSibling.classList.add("rk-translation-pending");
-			element.nextElementSibling.textContent = "Translating...";
-			return;
-		}
-		const translation = document.createElement("span");
-		translation.className = "rk-translation rk-translation-pending";
+		const translation = ensureTranslationElement(element);
+		translation.classList.remove("rk-translation-error");
+		translation.classList.add("rk-translation-pending");
 		translation.textContent = "Translating...";
-		element.after(translation);
 	}
 	function markTranslationError(element) {
-		if (!element.nextElementSibling?.classList.contains("rk-translation")) return;
-		element.nextElementSibling.classList.remove("rk-translation-pending");
-		element.nextElementSibling.classList.add("rk-translation-error");
-		element.nextElementSibling.textContent = "Translation paused. Tap Translate to retry.";
+		const translation = translationElement(element);
+		if (!translation) return;
+		translation.classList.remove("rk-translation-pending");
+		translation.classList.add("rk-translation-error");
+		translation.textContent = "Translation paused. Tap Translate to retry.";
+	}
+	function translationSourceText(element) {
+		if (!element.matches("li")) return element.innerText.trim();
+		const clone = element.cloneNode(true);
+		clone.querySelectorAll("ul, ol, .rk-translation").forEach((child) => child.remove());
+		return (clone.textContent ?? "").trim();
 	}
 	function isReadableBlock(element) {
 		if (element.closest([
@@ -812,13 +820,13 @@
 			"script",
 			"style"
 		].join(", "))) return false;
-		const text = element.innerText.trim();
+		const text = translationSourceText(element);
 		if (element.matches("h1, h2")) return text.length >= 8;
 		return text.length >= 50;
 	}
 	function collectTranslationBlocks(sourceId) {
-		return uniqueTranslationBlocks(Array.from(document.querySelectorAll("h1, h2, p")).filter(isReadableBlock).map((element) => {
-			const text = element.innerText.trim();
+		return uniqueTranslationBlocks(Array.from(document.querySelectorAll("h1, h2, p, li")).filter((element) => element.matches("li") || !element.closest("li")).filter(isReadableBlock).map((element) => {
+			const text = translationSourceText(element);
 			return {
 				element,
 				key: translationBlockKey(sourceId, text),

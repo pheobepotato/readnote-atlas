@@ -662,41 +662,62 @@ async function saveExcerptFromSelection(): Promise<void> {
   resetPendingSelection();
 }
 
-function insertTranslationAfter(paragraph: HTMLElement, text: string): void {
-  if (paragraph.nextElementSibling?.classList.contains("rk-translation")) {
-    paragraph.nextElementSibling.textContent = text;
-    paragraph.nextElementSibling.classList.remove("rk-translation-pending", "rk-translation-error");
-    return;
+function translationElement(element: HTMLElement): HTMLElement | null {
+  const candidate = element.matches("li")
+    ? element.querySelector<HTMLElement>(":scope > .rk-translation")
+    : element.nextElementSibling;
+  return candidate?.classList.contains("rk-translation") ? candidate as HTMLElement : null;
+}
+
+function ensureTranslationElement(element: HTMLElement): HTMLElement {
+  const existing = translationElement(element);
+  if (existing) {
+    return existing;
   }
 
   const translation = document.createElement("span");
   translation.className = "rk-translation";
+  if (element.matches("li")) {
+    // Keep valid list markup and put the parent's translation before its sublist.
+    element.insertBefore(translation, element.querySelector(":scope > ul, :scope > ol"));
+  } else {
+    element.after(translation);
+  }
+  return translation;
+}
+
+function insertTranslationAfter(element: HTMLElement, text: string): void {
+  const translation = ensureTranslationElement(element);
   translation.textContent = text;
-  paragraph.after(translation);
+  translation.classList.remove("rk-translation-pending", "rk-translation-error");
 }
 
 function markTranslationPending(element: HTMLElement): void {
-  if (element.nextElementSibling?.classList.contains("rk-translation")) {
-    element.nextElementSibling.classList.remove("rk-translation-error");
-    element.nextElementSibling.classList.add("rk-translation-pending");
-    element.nextElementSibling.textContent = "Translating...";
-    return;
-  }
-
-  const translation = document.createElement("span");
-  translation.className = "rk-translation rk-translation-pending";
+  const translation = ensureTranslationElement(element);
+  translation.classList.remove("rk-translation-error");
+  translation.classList.add("rk-translation-pending");
   translation.textContent = "Translating...";
-  element.after(translation);
 }
 
 function markTranslationError(element: HTMLElement): void {
-  if (!element.nextElementSibling?.classList.contains("rk-translation")) {
+  const translation = translationElement(element);
+  if (!translation) {
     return;
   }
+  translation.classList.remove("rk-translation-pending");
+  translation.classList.add("rk-translation-error");
+  translation.textContent = "Translation paused. Tap Translate to retry.";
+}
 
-  element.nextElementSibling.classList.remove("rk-translation-pending");
-  element.nextElementSibling.classList.add("rk-translation-error");
-  element.nextElementSibling.textContent = "Translation paused. Tap Translate to retry.";
+function translationSourceText(element: HTMLElement): string {
+  if (!element.matches("li")) {
+    return element.innerText.trim();
+  }
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  // Each nested item is collected separately; generated translations are never source text.
+  clone.querySelectorAll("ul, ol, .rk-translation").forEach((child) => child.remove());
+  return (clone.textContent ?? "").trim();
 }
 
 function isReadableBlock(element: HTMLElement): boolean {
@@ -721,7 +742,7 @@ function isReadableBlock(element: HTMLElement): boolean {
     return false;
   }
 
-  const text = element.innerText.trim();
+  const text = translationSourceText(element);
   if (element.matches("h1, h2")) {
     return text.length >= 8;
   }
@@ -731,15 +752,17 @@ function isReadableBlock(element: HTMLElement): boolean {
 
 function collectTranslationBlocks(sourceId: string): Array<TranslationBlock & { element: HTMLElement }> {
   return uniqueTranslationBlocks(
-    Array.from(document.querySelectorAll<HTMLElement>("h1, h2, p"))
+    Array.from(document.querySelectorAll<HTMLElement>("h1, h2, p, li"))
+      // A list item owns its paragraphs, so nested paragraph markup cannot duplicate it.
+      .filter((element) => element.matches("li") || !element.closest("li"))
       .filter(isReadableBlock)
       .map((element) => {
-      const text = element.innerText.trim();
-      return {
-        element,
-        key: translationBlockKey(sourceId, text),
-        text
-      };
+        const text = translationSourceText(element);
+        return {
+          element,
+          key: translationBlockKey(sourceId, text),
+          text
+        };
       })
   );
 }
