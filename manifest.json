@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Readnote Atlas",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "minimum_chrome_version": "116",
   "description": "Read English articles and videos with bilingual context, highlights, transcripts, and a personal knowledge base.",
   "permissions": ["sidePanel", "storage", "tabs", "scripting"],

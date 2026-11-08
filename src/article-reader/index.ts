@@ -136,8 +136,10 @@ function showToast(message: string): void {
   document.querySelector(".rk-toast")?.remove();
   const toast = document.createElement("div");
   toast.className = "rk-toast";
-  toast.textContent = message;
+  toast.setAttribute("role", "status");
+  toast.setAttribute("aria-live", "polite");
   document.body.append(toast);
+  toast.textContent = message;
   window.setTimeout(() => toast.remove(), 1600);
 }
 
@@ -665,12 +667,14 @@ async function saveExcerptFromSelection(): Promise<void> {
 
 function insertTranslationAfter(element: HTMLElement, text: string): void {
   const translation = ensureTranslationElement(element);
+  translation.hidden = !translationsVisible;
   translation.textContent = text;
   translation.classList.remove("rk-translation-pending", "rk-translation-error");
 }
 
 function markTranslationPending(element: HTMLElement): void {
   const translation = ensureTranslationElement(element);
+  translation.hidden = !translationsVisible;
   translation.classList.remove("rk-translation-error");
   translation.classList.add("rk-translation-pending");
   translation.textContent = "Translating...";
@@ -725,6 +729,7 @@ async function translateBatchWithFallback(batch: Array<TranslationBlock & { elem
   const translations = batchTranslations ?? batch.map(() => "");
   if (batch.length === 1) return translations;
   for (let index = 0; index < batch.length; index += 1) {
+    if (!translationsVisible) break;
     if (!isUsableTranslationText(translations[index])) {
       const [translation] = (await requestTranslations([batch[index].text])) ?? [];
       translations[index] = translation ?? "";
@@ -734,11 +739,45 @@ async function translateBatchWithFallback(batch: Array<TranslationBlock & { elem
 }
 
 let activeTranslation: Promise<void> | null = null;
+let translationsVisible = false;
+
+function updateTranslationControls(): void {
+  const toggle = document.querySelector<HTMLButtonElement>(".rk-page-actions-toggle");
+  if (!toggle) return;
+  toggle.textContent = translationsVisible ? (activeTranslation ? "…" : "✓") : "T";
+  toggle.setAttribute("aria-pressed", String(translationsVisible));
+  toggle.setAttribute("aria-busy", String(translationsVisible && Boolean(activeTranslation)));
+  const hasTranslation = Boolean(document.querySelector(".rk-translation:not(.rk-translation-pending):not(.rk-translation-error)"));
+  if (translationsVisible && !activeTranslation && !hasTranslation) toggle.textContent = "!";
+  toggle.title = translationsVisible
+    ? (activeTranslation ? "Translating — click to show original" : hasTranslation ? "Hide translations — keep notes and highlights" : "Translation unavailable — open More to retry, or click to show original")
+    : "Show translations — keep notes and highlights";
+}
+
+function setTranslationsVisible(visible: boolean): void {
+  translationsVisible = visible;
+  document.querySelectorAll<HTMLElement>(".rk-translation").forEach((node) => { node.hidden = !visible; });
+  updateTranslationControls();
+}
+
+function togglePageTranslation(): void {
+  if (translationsVisible) {
+    setTranslationsVisible(false);
+    showToast("Original view · notes and highlights kept");
+  } else {
+    runExtensionTask(translatePage);
+  }
+}
 
 function translatePage(): Promise<void> {
+  setTranslationsVisible(true);
   if (!activeTranslation) {
-    activeTranslation = translatePageOnce().finally(() => { activeTranslation = null; });
+    activeTranslation = translatePageOnce().finally(() => {
+      activeTranslation = null;
+      updateTranslationControls();
+    });
   }
+  updateTranslationControls();
   return activeTranslation;
 }
 
@@ -750,11 +789,13 @@ async function translatePageOnce(): Promise<void> {
   const source = currentSource;
   const blocks = collectTranslationBlocks(source.id);
   if (blocks.length === 0) {
+    setTranslationsVisible(false);
     showToast("Nothing to translate");
     return;
   }
 
   const cached = await listTranslations(source.id);
+  if (!translationsVisible) return;
   const cachedByKey = new Map(
     cached.filter((translation) => isUsableTranslationText(translation.translation)).map((translation) => [
       translation.textHash,
@@ -780,6 +821,7 @@ async function translatePageOnce(): Promise<void> {
   showToast(cachedBlockCount > 0 ? "Continuing translation" : "Translating");
   let translatedCount = cachedBlockCount;
   for (const batch of batches) {
+    if (!translationsVisible) break;
     const batchKeys = new Set(batch.map((item) => item.key));
     const occurrences = blocks.filter((item) => batchKeys.has(item.key) && item.element.isConnected);
     occurrences.forEach((item) => markTranslationPending(item.element));
@@ -817,10 +859,11 @@ async function translatePageOnce(): Promise<void> {
     });
   }
 
+  if (!translationsVisible) return;
   if (translatedCount > 0) {
     showToast(`Translated ${Math.min(translatedCount, blocks.length)}/${blocks.length}`);
   } else {
-    showToast("Setup needed");
+    showToast("Translation unavailable · open More to retry");
   }
 }
 
@@ -836,22 +879,30 @@ function injectPageActions(): void {
   toggle.type = "button";
   toggle.className = "rk-page-actions-toggle";
   toggle.textContent = "T";
-  toggle.title = "Readnote translation tools";
-  toggle.setAttribute("aria-label", "Open Readnote translation tools");
-  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-label", "Page translation");
+  toggle.setAttribute("aria-pressed", "false");
+  toggle.addEventListener("click", togglePageTranslation);
+
+  const tools = document.createElement("button");
+  tools.type = "button";
+  tools.className = "rk-page-tools-toggle";
+  tools.textContent = "⋯";
+  tools.title = "More page tools";
+  tools.setAttribute("aria-label", "More page tools");
+  tools.setAttribute("aria-expanded", "false");
 
   const menu = document.createElement("div");
   menu.className = "rk-page-actions-menu";
 
   function closePageActionsMenu(): void {
     actions.classList.remove("is-open");
-    toggle.setAttribute("aria-expanded", "false");
+    tools.setAttribute("aria-expanded", "false");
   }
 
   const translate = document.createElement("button");
   translate.type = "button";
   translate.className = "rk-translate-button";
-  translate.textContent = "Translate";
+  translate.textContent = "Retry missing translations";
   translate.addEventListener("click", () => {
     closePageActionsMenu();
     runExtensionTask(translatePage);
@@ -860,19 +911,28 @@ function injectPageActions(): void {
   const clearAll = document.createElement("button");
   clearAll.type = "button";
   clearAll.className = "rk-clear-all-button";
-  clearAll.textContent = "Clear all";
+  clearAll.textContent = "Delete page notes & highlights…";
   clearAll.addEventListener("click", () => {
     closePageActionsMenu();
-    runExtensionTask(clearAllAnnotationsForCurrentPage);
+    if (window.confirm("Delete all notes and highlights saved for this page? Translations and notes on other pages will be kept. This cannot be undone.")) {
+      runExtensionTask(clearAllAnnotationsForCurrentPage);
+    }
   });
 
-  toggle.addEventListener("click", () => {
+  tools.addEventListener("click", () => {
     const open = actions.classList.toggle("is-open");
-    toggle.setAttribute("aria-expanded", String(open));
+    tools.setAttribute("aria-expanded", String(open));
   });
   menu.append(translate, clearAll);
-  actions.append(toggle, menu);
+  actions.append(toggle, tools, menu);
   document.body.append(actions);
+  updateTranslationControls();
+  actions.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closePageActionsMenu();
+      tools.focus();
+    }
+  });
 
   document.addEventListener("pointerdown", (event) => {
     if (!actions.contains(event.target as Node)) {

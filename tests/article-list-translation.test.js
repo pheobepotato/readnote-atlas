@@ -30,9 +30,9 @@ function reader(html) {
   assert.ok(bundle.includes('runExtensionTask(bootstrap);'));
   window.eval(bundle.replace('runExtensionTask(bootstrap);', `
     currentSource = { id: 'test-source' };
-    window.readerTest = { collectTranslationBlocks, translatePage };
+    window.readerTest = { collectTranslationBlocks, translatePage, injectPageActions };
   `));
-  return { dom, window, requests, api: window.readerTest };
+  return { dom, window, requests, api: window.readerTest, storage };
 }
 
 test('article translation sends and displays all three bullets between paragraphs', async () => {
@@ -175,4 +175,57 @@ test('all six heading levels are collected, including one-word headings', async 
   const { dom, requests, api } = reader('<article>' + Array.from({length: 6}, (_, i) => `<h${i + 1}>Title${i + 1}</h${i + 1}>`).join('') + '</article>');
   try { await api.translatePage(); assert.deepEqual(requests, ['Title1', 'Title2', 'Title3', 'Title4', 'Title5', 'Title6']); }
   finally { dom.window.close(); }
+});
+
+
+test('translation toggle restores original view without touching saved notes or highlights', async () => {
+  const { dom, window, requests, api, storage } = reader('<article><p><mark class="rk-annotation">Keep this highlight.</mark> Read this passage.</p><span class="rk-note-bubble">My note</span></article>');
+  storage['annotations:test-source'] = [{ id: 'note-1', note: 'My thought', styles: ['highlight'] }];
+  const savedNotes = JSON.stringify(storage['annotations:test-source']);
+  try {
+    api.injectPageActions();
+    const toggle = window.document.querySelector('.rk-page-actions-toggle');
+    assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+    toggle.click();
+    await api.translatePage();
+    assert.equal(toggle.textContent, '✓');
+    assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+    const translation = window.document.querySelector('.rk-translation');
+    assert.equal(translation.hidden, false);
+    toggle.click();
+    assert.equal(translation.hidden, true);
+    assert.equal(window.getComputedStyle(translation).display, 'none');
+    assert.equal(toggle.textContent, 'T');
+    assert.equal(window.document.querySelector('.rk-annotation').textContent, 'Keep this highlight.');
+    assert.equal(window.document.querySelector('.rk-note-bubble').textContent, 'My note');
+    assert.equal(JSON.stringify(storage['annotations:test-source']), savedNotes);
+    const calls = requests.length;
+    toggle.click();
+    await api.translatePage();
+    assert.equal(translation.hidden, false);
+    assert.equal(requests.length, calls, 'showing again reuses cached translations');
+    assert.equal(window.document.querySelectorAll('.rk-translation').length, 1);
+  } finally { dom.window.close(); }
+});
+
+test('hiding during translation keeps late results hidden and pauses subsequent batches', async () => {
+  const { dom, window, requests, api } = reader('<article><p>First block.</p><p>Second block.</p></article>');
+  const original = window.chrome.runtime.sendMessage;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  window.chrome.runtime.sendMessage = async message => { await gate; return original(message); };
+  try {
+    api.injectPageActions();
+    const run = api.translatePage();
+    await new Promise(resolve => setImmediate(resolve));
+    window.document.querySelector('.rk-page-actions-toggle').click();
+    release();
+    await run;
+    assert.equal(requests.length, 1);
+    assert.equal(window.document.querySelector('.rk-translation').hidden, true);
+    assert.equal(window.document.querySelector('.rk-page-actions-toggle').getAttribute('aria-pressed'), 'false');
+    await api.translatePage();
+    assert.deepEqual(requests, ['First block.', 'Second block.']);
+    assert.equal(window.document.querySelectorAll('.rk-translation:not([hidden])').length, 2);
+  } finally { release(); dom.window.close(); }
 });

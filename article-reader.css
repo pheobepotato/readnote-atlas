@@ -26,7 +26,8 @@
   pointer-events: auto;
 }
 
-.rk-page-actions-toggle {
+.rk-page-actions-toggle,
+.rk-page-tools-toggle {
   width: 30px;
   height: 30px;
   padding: 0 !important;
@@ -37,7 +38,8 @@
 
 .rk-page-actions:hover .rk-page-actions-toggle,
 .rk-page-actions.is-open .rk-page-actions-toggle,
-.rk-page-actions-toggle:focus-visible {
+.rk-page-actions-toggle:focus-visible,
+.rk-page-tools-toggle:focus-visible {
   opacity: 1;
   transform: translateX(0);
 }
@@ -47,7 +49,7 @@
   top: 0;
   right: calc(100% + 7px);
   width: max-content;
-  max-width: calc(100vw - 61px);
+  max-width: calc(100vw - 98px);
   flex-wrap: wrap;
   display: flex;
   gap: 6px;
@@ -454,4 +456,24 @@
   box-shadow: 0 12px 30px rgba(31, 35, 40, 0.16);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 13px;
+}
+
+/* Translation visibility never changes source annotations or saved data. */
+.rk-translation[hidden] {
+  display: none !important;
+}
+
+.rk-page-actions-toggle[aria-pressed="true"] {
+  opacity: 1;
+  color: #17633a;
+  background: #effaf2;
+}
+
+.rk-page-actions button:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 3px;
+}
+
+.rk-page-actions-menu .rk-clear-all-button {
+  color: #a12622;
 }

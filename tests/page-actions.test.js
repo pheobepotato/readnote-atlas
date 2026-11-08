@@ -34,7 +34,7 @@ test('relocated article launcher opens tools and dismisses on a webpage pointerd
   const dom = pageActions();
   try {
     const { document, getComputedStyle, Event } = dom.window;
-    const toggle = document.querySelector('.rk-page-actions-toggle');
+    const toggle = document.querySelector('.rk-page-tools-toggle');
     const menu = document.querySelector('.rk-page-actions-menu');
     toggle.click();
     assert.equal(toggle.getAttribute('aria-expanded'), 'true');
