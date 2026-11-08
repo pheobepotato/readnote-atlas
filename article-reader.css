@@ -1,7 +1,8 @@
 .rk-page-actions {
   position: fixed;
-  top: 16px;
-  right: 6px;
+  bottom: 35vh;
+  right: 12px;
+  pointer-events: none;
   z-index: 2147483646;
   display: flex;
   gap: 7px;
@@ -22,14 +23,15 @@
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .rk-page-actions-toggle {
   width: 30px;
   height: 30px;
   padding: 0 !important;
-  opacity: 0;
-  transform: translateX(12px);
+  opacity: 0.45;
+  transform: translateX(0);
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
@@ -41,6 +43,12 @@
 }
 
 .rk-page-actions-menu {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 7px);
+  width: max-content;
+  max-width: calc(100vw - 61px);
+  flex-wrap: wrap;
   display: flex;
   gap: 6px;
   opacity: 1;

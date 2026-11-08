@@ -159,5 +159,5 @@ test("article page actions collapse behind one quiet launcher", () => {
   assert.match(article, /rk-page-actions-menu/);
   assert.match(article, /function closePageActionsMenu/);
   assert.match(css, /\.rk-page-actions:not\(\.is-open\) \.rk-page-actions-menu/);
-  assert.match(css, /\.rk-page-actions-toggle[\s\S]*?opacity: 0;/);
+  assert.match(css, /\.rk-page-actions-toggle[\s\S]*?opacity: 0\.45;/);
 });
