@@ -70,6 +70,8 @@ The surface uses neutral graphite translucency, white English, pale-yellow Chine
 - The saved note remains available locally if every external service is offline.
 - When configured, the same note is appended to Obsidian and Notion with a playable timestamp link.
 - Article highlights continue to use the same knowledge destination.
+- Article translation has a direct, reversible T / ✓ visibility toggle. Hiding translations preserves annotations and cache, pauses subsequent requests, and keeps late results hidden.
+- Annotation deletion is separate from reading display, names the page scope, and requires confirmation.
 - A video enters the Watched Library only after ten minutes of actual visible playback; seeking does not inflate watch time.
 - Atlas supports article/video workflows and desktop transport. Native desktop rendering and knowledge sync use their respective optional local processes.
 - When the helper is running, leaving the YouTube tab or minimizing Chrome shows one always-on-top caption box, and returning to YouTube hides it.

@@ -31,7 +31,7 @@ Keep API keys out of source files, logs, screenshots, and commits. Do not change
 
 If the agent cannot control my Chrome window, it should finish the local build and give me the one remaining Chrome step: open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select the folder containing `manifest.json`.
 
-The faint **T** launcher sits along the right edge in the lower half of the page. Click it to open translation tools; the surrounding space stays clickable.
+The faint **T** launcher sits along the right edge in the lower half of the page. Click **T** to translate; **…** means translation is running, and **✓** means translations are shown. Click again for original-only reading: highlights, notes and translation cache stay saved. Use the adjacent **⋯** menu to retry missing translations or explicitly delete this page’s annotations. The surrounding space stays clickable.
 
 ## What I can do
 
@@ -96,7 +96,7 @@ npm run build              # build the article reader
 npm test                   # run product and unit tests
 npm run typecheck          # check TypeScript
 npm run check              # build, typecheck, test, and audit the release set
-npm run package            # create dist/readnote-atlas-v0.3.2.zip
+npm run package            # create dist/readnote-atlas-v0.3.3.zip
 npm run companion          # start article translation and knowledge sync
 npm run desktop:captions   # start the optional macOS caption helper
 ```
