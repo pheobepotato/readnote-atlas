@@ -13,7 +13,7 @@ test("manifest exposes the unified article and video product", () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Readnote Atlas");
-  assert.equal(manifest.version, "0.3.3");
+  assert.equal(manifest.version, "0.3.4");
   assert.equal(packageJson.version, manifest.version);
   assert.deepEqual(youtubeLayer.js, [
     "transcript.js",
