@@ -902,7 +902,7 @@ function injectPageActions(): void {
   const translate = document.createElement("button");
   translate.type = "button";
   translate.className = "rk-translate-button";
-  translate.textContent = "Retry missing translations";
+  translate.textContent = "Retry translation";
   translate.addEventListener("click", () => {
     closePageActionsMenu();
     runExtensionTask(translatePage);
@@ -911,7 +911,7 @@ function injectPageActions(): void {
   const clearAll = document.createElement("button");
   clearAll.type = "button";
   clearAll.className = "rk-clear-all-button";
-  clearAll.textContent = "Delete page notes & highlights…";
+  clearAll.textContent = "Delete page annotations…";
   clearAll.addEventListener("click", () => {
     closePageActionsMenu();
     if (window.confirm("Delete all notes and highlights saved for this page? Translations and notes on other pages will be kept. This cannot be undone.")) {
